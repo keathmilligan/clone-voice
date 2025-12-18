@@ -23,6 +23,15 @@ def _status(msg: str) -> None:
     console.print(f"[dim]{msg}[/dim]", highlight=False)
 
 
+def _looks_like_file(text: str) -> bool:
+    """Check if text looks like a file path (exists or has common text file extension)."""
+    path = Path(text)
+    if path.exists() and path.is_file():
+        return True
+    # Check for common text file extensions
+    return path.suffix.lower() in {".txt", ".md", ".text"}
+
+
 @app.command()
 def record(
     name: Annotated[
@@ -109,7 +118,7 @@ def process(
 def generate(
     text: Annotated[
         str,
-        typer.Argument(help="Text to synthesize"),
+        typer.Argument(help="Text to synthesize (or path to a text file)"),
     ],
     voice: Annotated[
         Path,
@@ -132,14 +141,27 @@ def generate(
         typer.Option("--no-fp16", help="Disable half-precision (slower but more compatible)"),
     ] = False,
 ) -> None:
-    """Generate speech from text using a voice sample."""
+    """Generate speech from text or a text file using a voice sample."""
+    # Check if input looks like a file path
+    input_text = text
+    if _looks_like_file(text):
+        input_path = Path(text)
+        if not input_path.exists():
+            console.print(f"[red]Error: File not found: {text}[/red]")
+            raise typer.Exit(1)
+        input_text = input_path.read_text(encoding="utf-8").strip()
+        if not input_text:
+            console.print(f"[red]Error: Empty text file: {text}[/red]")
+            raise typer.Exit(1)
+        console.print(f"[blue]Reading text from: {input_path}[/blue]")
+
     _status("Loading TTS engine (this may take a moment)...")
     from clone_voice.synthesizer import Synthesizer
 
     synthesizer = Synthesizer(use_fp16=not no_fp16)
 
     output_path = synthesizer.generate(
-        text=text,
+        text=input_text,
         speaker_wav=voice,
         output_path=output,
         language=language,
@@ -148,56 +170,6 @@ def generate(
 
     console.print(f"\n[bold green]Generation complete![/bold green]")
     console.print(f"Output: {output_path}")
-
-
-@app.command()
-def batch(
-    input_file: Annotated[
-        Path,
-        typer.Argument(help="Text file to synthesize"),
-    ],
-    voice: Annotated[
-        Path,
-        typer.Option("--voice", "-v", help="Path to voice sample WAV file"),
-    ],
-    output_dir: Annotated[
-        Optional[Path],
-        typer.Option("--output-dir", "-o", help="Output directory"),
-    ] = None,
-    language: Annotated[
-        str,
-        typer.Option("--language", "-l", help="Language code"),
-    ] = "en",
-    speed: Annotated[
-        float,
-        typer.Option("--speed", "-s", help="Speech speed multiplier (0.5-2.0)"),
-    ] = 1.0,
-    no_split: Annotated[
-        bool,
-        typer.Option("--no-split", help="Don't split into sentences"),
-    ] = False,
-    no_fp16: Annotated[
-        bool,
-        typer.Option("--no-fp16", help="Disable half-precision (slower but more compatible)"),
-    ] = False,
-) -> None:
-    """Generate speech from a text file."""
-    _status("Loading TTS engine (this may take a moment)...")
-    from clone_voice.synthesizer import Synthesizer
-
-    synthesizer = Synthesizer(use_fp16=not no_fp16)
-
-    output_paths = synthesizer.generate_from_file(
-        input_file=input_file,
-        speaker_wav=voice,
-        output_dir=output_dir,
-        language=language,
-        split_sentences=not no_split,
-        speed=speed,
-    )
-
-    console.print(f"\n[bold green]Batch generation complete![/bold green]")
-    console.print(f"Generated {len(output_paths)} files")
 
 
 @app.command(name="list")
